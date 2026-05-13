@@ -3,7 +3,9 @@
 
 Julia package implementing quantum chemistry programming
 projects: molecular geometry, vibrations, RHF/ROHF/UHF/DIIS/symmetry/out-of-core
-SCF/direct SCF, RHF gradients/geometry optimization, MP2/UMP2, CCSD/UCCSD/CCSDT, CCSD(T), CIS/CISD/HCI/FCI/DMRG, TDHF/RPA, Davidson-Liu CIS, and EOM-CCSD.
+SCF/direct SCF, RHF gradients/geometry optimization, MP2/RI-MP2/UMP2,
+CCSD/UCCSD/CCSDT, CCSD(T), CIS/CISD/HCI/FCI/DMRG, TDHF/RPA, Davidson-Liu CIS,
+EOM-CCSD, and CIS/EOM-CCSD transition properties.
 Uses PySCF for one- and two-electron integrals.
 
 # Quick start
@@ -18,6 +20,7 @@ opt    = run_rhf_geometry_optimization(rhf; maxiter=5)
 rohf   = run_rohf()                      # restricted open-shell SCF
 uhf    = run_uhf()                       # unrestricted SCF
 mp2    = run_mp2(rhf)
+dfmp2  = run_df_mp2(rhf)
 ump2   = run_ump2(uhf)
 ccsd   = run_ccsd(rhf, mp2)
 uccsd  = run_uccsd(uhf)
@@ -27,6 +30,8 @@ hci    = run_hci(rhf, mp2)
 fci    = run_fci(rhf, mp2)
 dmrg   = run_dmrg(rhf, mp2)              # custom direct HF-MO-basis DMRG
 ccsdt  = run_ccsd_t(rhf, mp2, ccsd)
+excited = run_excited_states(rhf, mp2)
+cis_props = run_cis_properties(rhf, excited)
 ```
 """
 module QuantumChem
@@ -49,6 +54,7 @@ include("direct_scf.jl")
 include("uhf.jl")
 include("rohf.jl")
 include("mp2.jl")
+include("density_fitting.jl")
 include("ccsd.jl")
 include("uccsd.jl")
 include("ump2.jl")
@@ -61,6 +67,7 @@ include("fci_dmrg.jl")
 include("custom_dmrg.jl")
 include("ccsdt.jl")
 include("eom_ccsd.jl")
+include("response_properties.jl")
 
 export Molecule, read_molecule, atomic_mass, atomic_masses
 export distance, distance_matrix, bond_angle, out_of_plane_angle, torsion_angle
@@ -76,7 +83,7 @@ export symmetry_blocks, assemble_symmetry_blocks, symmetry_project, symmetry_off
 export block_multiply, block_s_half, block_eigen, make_density_symmetry, make_fock_symmetry
 export ERIFile, compound_index, read_eri_file_header, write_unique_eri_file, make_fock_outcore
 export direct_jk, make_fock_direct, run_direct_rhf
-export run_rhf, run_rohf, run_uhf, run_mp2, run_ump2, run_ccsd, run_uccsd, run_ccsd_t, run_ccsdt, run_excited_states, run_davidson_cis, run_cisd, run_hci, run_fci, run_dmrg, run_fci_dmrg, run_eom_ccsd
+export run_rhf, run_rohf, run_uhf, run_mp2, run_df_mp2, run_ump2, run_ccsd, run_uccsd, run_ccsd_t, run_ccsdt, run_excited_states, run_davidson_cis, run_cisd, run_hci, run_fci, run_dmrg, run_fci_dmrg, run_eom_ccsd
 export run_rhf_gradient, rhf_gradient, rhf_electronic_gradient
 export rhf_spin_density, rhf_energy_weighted_density, nuclear_repulsion_gradient
 export run_rhf_geometry_optimization, rhf_geometry_coordinates, rhf_atom_symbols
@@ -84,6 +91,8 @@ export format_atoms_bohr
 export uhf_electron_counts, make_uhf_density, make_uhf_fock, uhf_energy, spin_square
 export rohf_shell_counts, rohf_occupations, make_rohf_density, roothaan_fock
 export compute_mp2, compute_ump2, transform_eri
+export DensityFitInfo, df_metric_inv_sqrt, df_ao_factors, df_mo_factors
+export df_eri_from_factors, compute_df_mp2
 export mo_to_aso, Mat_aotoMat_mo, Mat_motoMat_so, mp2_so, make_td_spinorbital
 export uhf_spinorbital_order, uhf_spinorbital_coefficients
 export antisymmetrize_spinorbital_eri, build_uccsd_spinorbital_inputs
@@ -109,5 +118,8 @@ export ccsdt_energy, ccsdt_residuals, ccsdt_scf, run_cisdt_model
 export eom_double_indices, eom_dimension, pack_eom_amplitudes, unpack_eom_amplitudes
 export ccsd_residuals, eom_ccsd_diagonal, build_eom_ccsd_jacobian
 export triples_correction
+export ao_dipole_integrals, mo_dipole_integrals, nuclear_dipole, rhf_dipole_moment
+export oscillator_strengths, cis_transition_dipoles, eom_ccsd_transition_dipoles
+export run_cis_properties, run_eom_ccsd_properties
 
 end

@@ -501,12 +501,15 @@ function run_excited_states(rhf, mp2_result; verbose=true)
     n_elec = rhf.n_elec
 
     cis_matrix = build_cis_spinorbital_matrix(eri, E, n_elec)
-    cis_energies = cis_excitation_energies(cis_matrix)
+    cis_factorization = eigen(Symmetric(cis_matrix))
+    cis_energies = cis_factorization.values
 
     singlet_matrix = build_cis_spin_adapted_matrix(eri, E, n_elec; multiplicity=:singlet)
-    singlet_energies = cis_excitation_energies(singlet_matrix)
+    singlet_factorization = eigen(Symmetric(singlet_matrix))
+    singlet_energies = singlet_factorization.values
     triplet_matrix = build_cis_spin_adapted_matrix(eri, E, n_elec; multiplicity=:triplet)
-    triplet_energies = cis_excitation_energies(triplet_matrix)
+    triplet_factorization = eigen(Symmetric(triplet_matrix))
+    triplet_energies = triplet_factorization.values
 
     A = cis_matrix
     B = build_rpa_b_matrix(eri, E, n_elec)
@@ -524,11 +527,14 @@ function run_excited_states(rhf, mp2_result; verbose=true)
     return (
         cis_matrix=cis_matrix,
         cis_energies=cis_energies,
+        cis_vectors=cis_factorization.vectors,
         cis_energies_ev=cis_energies .* HARTREE_TO_EV,
         singlet_matrix=singlet_matrix,
         singlet_energies=singlet_energies,
+        singlet_vectors=singlet_factorization.vectors,
         triplet_matrix=triplet_matrix,
         triplet_energies=triplet_energies,
+        triplet_vectors=triplet_factorization.vectors,
         rpa_A=A,
         rpa_B=B,
         rpa_matrix=build_rpa_matrix(A, B),

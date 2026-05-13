@@ -32,6 +32,8 @@ the local code and tests.
 | #24 | RHF analytic gradients | [project-24-rhf-gradients.md](project-24-rhf-gradients.md) |
 | #25 | RHF geometry optimization | [project-25-rhf-geometry-optimization.md](project-25-rhf-geometry-optimization.md) |
 | #26 | Integral-direct RHF | [project-26-integral-direct-rhf.md](project-26-integral-direct-rhf.md) |
+| #27 | Density fitting / RI-MP2 | [project-27-density-fitting.md](project-27-density-fitting.md) |
+| #28 | CIS/EOM-CCSD response properties | [project-28-response-properties.md](project-28-response-properties.md) |
 
 General package entry point: `src/QuantumChem.jl`.
 

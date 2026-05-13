@@ -8,7 +8,7 @@ const H2O_CRAWFORD_GEOM =
     "H 1.638036840407 1.136548822547 0.000000000000;" *
     "H -1.638036840407 1.136548822547 0.000000000000"
 
-const METHOD_ORDER = ["rhf", "mp2", "ccsd", "ccsd_t", "ccsdt", "cisd", "hci", "dmrg"]
+const METHOD_ORDER = ["rhf", "mp2", "ri_mp2", "ccsd", "ccsd_t", "ccsdt", "cisd", "hci", "dmrg"]
 
 function usage()
     println("""
@@ -18,14 +18,15 @@ function usage()
       julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl
       julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl --all
       julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl --all --force-heavy
-      julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl --methods=rhf,mp2,ccsd,ccsd_t,dmrg
+      julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl --methods=rhf,mp2,ri_mp2,ccsd,ccsd_t,dmrg
 
     Options:
       --basis=cc-pvdz              Basis set passed to PySCF.
-      --methods=list               Comma-separated methods: rhf, mp2, ccsd, ccsd_t,
-                                   ccsdt, cisd, hci, dmrg, or all.
+      --methods=list               Comma-separated methods: rhf, mp2, ri_mp2,
+                                   ccsd, ccsd_t, ccsdt, cisd, hci, dmrg, or all.
       --all                        Request every method.
       --force-heavy                Actually run full-basis CCSDT and large dense CISD.
+      --df-auxbasis=weigend        Auxiliary basis for RI-MP2.
       --cisd-max-gb=2.0            Dense CISD Hamiltonian memory guard.
       --ccsd-maxiter=100           CCSD iteration cap.
       --ccsdt-maxiter=25           CCSDT iteration cap when --force-heavy is set.
@@ -45,6 +46,7 @@ function normalize_method(method::AbstractString)
     raw == "all" && return "all"
     raw in ("ccsd(t)", "ccsd_t", "ccsd-t", "perturbative_triples") && return "ccsd_t"
     raw in ("ccsdt", "full_ccsdt", "full-ccsdt") && return "ccsdt"
+    raw in ("ri_mp2", "ri-mp2", "df_mp2", "df-mp2", "dfmp2", "rimp2") && return "ri_mp2"
     raw in ("rhf", "hf") && return "rhf"
     raw in ("mp2", "ccsd", "cisd", "hci", "dmrg") && return raw
     throw(ArgumentError("Unknown method '$method'"))
@@ -62,6 +64,7 @@ function parse_args(args)
         "basis" => "cc-pvdz",
         "methods" => String[],
         "force_heavy" => false,
+        "df_auxbasis" => "weigend",
         "cisd_max_gb" => 2.0,
         "ccsd_maxiter" => 100,
         "ccsdt_maxiter" => 25,
@@ -86,7 +89,9 @@ function parse_args(args)
         elseif arg == "--verbose-methods"
             opts["verbose_methods"] = true
         elseif startswith(arg, "--basis=")
-            opts["basis"] = split(arg, "=", limit=2)[2]
+            opts["basis"] = String(split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--df-auxbasis=")
+            opts["df_auxbasis"] = String(split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--methods=")
             opts["methods"] = parse_method_list(split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--cisd-max-gb=")
@@ -115,7 +120,7 @@ function parse_args(args)
     end
 
     if isempty(opts["methods"])
-        opts["methods"] = ["rhf", "mp2", "ccsd", "ccsd_t", "hci", "dmrg"]
+        opts["methods"] = ["rhf", "mp2", "ri_mp2", "ccsd", "ccsd_t", "hci", "dmrg"]
     end
     return opts
 end
@@ -179,9 +184,9 @@ function run_and_record!(records, method, runner, summarizer)
     end
 end
 
-function print_records(records)
+function print_records(records; basis="cc-pVDZ")
     println()
-    println("H2O cc-pVDZ method comparison")
+    println("H2O $(basis) method comparison")
     @printf("%-10s %-8s %18s %18s %12s %10s  %s\n",
             "method", "status", "total_Eh", "corr_Eh", "dimension", "seconds", "notes")
     println(repeat("-", 104))
@@ -228,6 +233,15 @@ function main(args)
                        correlation=result.emp2,
                        dimension=size(result.new_eri, 1),
                        notes="MO ERI size=$(size(result.new_eri))"))
+    end
+
+    if "ri_mp2" in methods && rhf !== nothing
+        run_and_record!(records, "RI-MP2",
+            () -> run_df_mp2(rhf; auxbasis=opts["df_auxbasis"], verbose=verbose),
+            result -> (total=result.total_energy,
+                       correlation=result.emp2,
+                       dimension="$(rhf.nbasis)x$(rhf.nbasis)x$(result.naux)",
+                       notes="auxbasis=$(result.auxbasis), cond=$(result.metric_condition)"))
     end
 
     if "ccsd" in methods && rhf !== nothing && mp2 !== nothing
@@ -318,7 +332,7 @@ function main(args)
                        notes="terms=$(length(result.mpo.terms)), <N>=$(result.particle_number)"))
     end
 
-    print_records(records)
+    print_records(records; basis=opts["basis"])
 end
 
 main(ARGS)

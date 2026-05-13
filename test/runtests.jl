@@ -30,6 +30,7 @@ GC.enable(false)
 # Tolerances — tight enough to catch regressions, loose enough for float variance
 const RHF_TOL  = 1e-8
 const MP2_TOL  = 1e-6
+const DF_MP2_TOL = 1e-9
 const CCSD_TOL = 1e-6
 const CCSDT_TOL = 1e-6
 const FULL_CCSDT_TOL = 1e-8
@@ -42,10 +43,12 @@ const HCI_TOL = 1e-8
 const FCI_TOL = 1e-8
 const DMRG_TOL = 1e-8
 const GRADIENT_TOL = 1e-8
+const PROPERTY_TOL = 1e-8
 
 # Reference values from Crawford Project #5
 const E_HF_REF    = -74.942079928192
 const E_MP2_REF   =  -0.049149636120
+const E_DF_MP2_REF = -0.04909043720344019
 const E_CCSD_REF  =  -0.070680088376
 const E_TOT_REF   = -75.012760016568
 const E_TRIPLES_REF = -0.000099877272
@@ -88,6 +91,16 @@ const RPA_FIRST_REF = [
     0.3651313107, 0.3651313107, 0.3651313107,
     0.4153174946,
 ]
+const RHF_DIPOLE_REF = [-5.124270729348505e-15, 0.6035212965259636, 5.193233064992663e-16]
+const CIS_OSCILLATOR_REF = [
+    0.0023412740124832583,
+    9.677920247152556e-30,
+    0.06492627323862235,
+    0.01546735543794491,
+    1.2519369106319123,
+]
+const EOM_OSCILLATOR_FOURTH_REF = 0.0019506820621747502
+const EOM_TRANSITION_Z_FOURTH_REF = 0.09514228128608646
 
 const ACETALDEHYDE_GEOM = """
 7
@@ -166,6 +179,7 @@ const ump2_oh_result = run_ump2(uhf_oh_result; verbose=false)
 const uccsd_closed_result = run_uccsd(uhf_result; diis=true, verbose=false)
 const uccsd_oh_result = run_uccsd(uhf_oh_result; diis=true, verbose=false)
 const mp2_result  = run_mp2(rhf_result; verbose=false)
+const df_mp2_result = run_df_mp2(rhf_result; return_eri=true, verbose=false)
 const cisd_result = run_cisd(rhf_result, mp2_result; verbose=false)
 const hci_result = run_hci(rhf_result, mp2_result; verbose=false)
 const fci_result = run_fci(rhf_result, mp2_result; verbose=false)
@@ -177,6 +191,8 @@ const ccsdt_full_result = run_ccsdt(rhf_result, mp2_result; verbose=false)
 const excited_result = run_excited_states(rhf_result, mp2_result; verbose=false)
 const davidson_result = run_davidson_cis(rhf_result, mp2_result; nroots=5, verbose=false)
 const eomccsd_result = run_eom_ccsd(rhf_result, mp2_result, ccsd_diis_result; nroots=5, verbose=false)
+const cis_properties_result = run_cis_properties(rhf_result, excited_result; nroots=5, verbose=false)
+const eomccsd_properties_result = run_eom_ccsd_properties(rhf_result, eomccsd_result; nroots=5, verbose=false)
 
 @testset "QuantumChem" begin
 
@@ -287,6 +303,43 @@ const eomccsd_result = run_eom_ccsd(rhf_result, mp2_result, ccsd_diis_result; nr
     @testset "MP2" begin
         @test isapprox(mp2_result.emp2, E_MP2_REF; atol=MP2_TOL)
         @test size(mp2_result.new_eri) == (7, 7, 7, 7)
+    end
+
+    @testset "Project #27 density-fitted MP2" begin
+        @test df_mp2_result.auxbasis == "weigend"
+        @test df_mp2_result.naux == 71
+        @test size(df_mp2_result.mo_factors) == (7, 7, 71)
+        @test size(df_mp2_result.new_eri) == (7, 7, 7, 7)
+        @test isapprox(df_mp2_result.emp2, E_DF_MP2_REF; atol=DF_MP2_TOL)
+        @test isapprox(df_mp2_result.total_energy,
+                       rhf_result.total_energy + E_DF_MP2_REF; atol=DF_MP2_TOL)
+        @test abs(df_mp2_result.emp2 - mp2_result.emp2) < 1e-4
+        @test df_mp2_result.metric_condition > 1.0
+
+        @test isapprox(
+            df_mp2_result.new_eri[1, 2, 3, 4],
+            dot(view(df_mp2_result.mo_factors, 1, 2, :),
+                view(df_mp2_result.mo_factors, 3, 4, :));
+            atol=1e-12,
+        )
+        @test isapprox(df_mp2_result.new_eri[1,2,3,4],
+                       df_mp2_result.new_eri[3,4,1,2]; atol=1e-12)
+        @test isapprox(
+            compute_df_mp2(df_mp2_result.mo_factors,
+                           rhf_result.orbital_energies,
+                           rhf_result.n_elec ÷ 2,
+                           rhf_result.nbasis),
+            df_mp2_result.emp2;
+            atol=1e-12,
+        )
+        @test isapprox(
+            compute_mp2(df_mp2_result.new_eri,
+                        rhf_result.orbital_energies,
+                        rhf_result.n_elec ÷ 2,
+                        rhf_result.nbasis),
+            df_mp2_result.emp2;
+            atol=1e-12,
+        )
     end
 
     @testset "ASO basis" begin
@@ -549,6 +602,7 @@ const eomccsd_result = run_eom_ccsd(rhf_result, mp2_result, ccsd_diis_result; nr
         @test size(excited_result.singlet_matrix) == (10, 10)
         @test size(excited_result.triplet_matrix) == (10, 10)
         @test size(excited_result.rpa_matrix) == (80, 80)
+        @test size(excited_result.singlet_vectors) == (10, 10)
 
         @test all(isapprox.(excited_result.cis_energies[1:length(CIS_FIRST_REF)],
                             CIS_FIRST_REF; atol=1e-9))
@@ -580,6 +634,7 @@ const eomccsd_result = run_eom_ccsd(rhf_result, mp2_result, ccsd_diis_result; nr
         @test eomccsd_result.doubles == 270
         @test maximum(abs.(eomccsd_result.residual)) < 1e-8
         @test length(eomccsd_result.all_eigenvalues) == eomccsd_result.dimension
+        @test size(eomccsd_result.vectors) == (eomccsd_result.dimension, 5)
         @test all(eomccsd_result.energies .> 0.0)
         @test all(isapprox.(eomccsd_result.energies,
                             [0.2752578782, 0.2752578782, 0.2752578782,
@@ -601,6 +656,48 @@ const eomccsd_result = run_eom_ccsd(rhf_result, mp2_result, ccsd_diis_result; nr
         @test isapprox(rd2[2,1,1,2], -0.25; atol=1e-14)
         @test isapprox(rd2[1,2,2,1], -0.25; atol=1e-14)
         @test isapprox(rd2[2,1,2,1], 0.25; atol=1e-14)
+    end
+
+    @testset "Project #28 CIS and EOM-CCSD properties" begin
+        ao_dipoles = ao_dipole_integrals(rhf_result)
+        @test size(ao_dipoles) == (3, rhf_result.nbasis, rhf_result.nbasis)
+        @test isapprox(rhf_dipole_moment(rhf_result; ao_dipoles), RHF_DIPOLE_REF; atol=PROPERTY_TOL)
+
+        @test cis_properties_result.method == :CIS
+        @test size(cis_properties_result.transition_dipoles) == (5, 3)
+        @test all(isapprox.(cis_properties_result.energies,
+                            excited_result.singlet_energies[1:5]; atol=1e-12))
+        @test all(isapprox.(cis_properties_result.oscillator_strengths,
+                            CIS_OSCILLATOR_REF; atol=PROPERTY_TOL))
+        @test isapprox(
+            oscillator_strengths(cis_properties_result.energies,
+                                 cis_properties_result.transition_dipoles),
+            cis_properties_result.oscillator_strengths;
+            atol=1e-12,
+        )
+        @test isapprox(
+            cis_transition_dipoles(rhf_result,
+                                   excited_result.singlet_vectors[:, 1:5];
+                                   mo_dipoles=cis_properties_result.mo_dipoles),
+            cis_properties_result.transition_dipoles;
+            atol=1e-12,
+        )
+
+        @test eomccsd_properties_result.method == :EOM_CCSD
+        @test size(eomccsd_properties_result.transition_dipoles) == (5, 3)
+        @test all(isapprox.(eomccsd_properties_result.energies,
+                            eomccsd_result.energies; atol=1e-12))
+        @test isapprox(
+            oscillator_strengths(eomccsd_properties_result.energies,
+                                 eomccsd_properties_result.transition_dipoles),
+            eomccsd_properties_result.oscillator_strengths;
+            atol=1e-12,
+        )
+        @test maximum(eomccsd_properties_result.oscillator_strengths[[1, 2, 3, 5]]) < 1e-20
+        @test isapprox(eomccsd_properties_result.oscillator_strengths[4],
+                       EOM_OSCILLATOR_FOURTH_REF; atol=PROPERTY_TOL)
+        @test isapprox(abs(eomccsd_properties_result.transition_dipoles[4, 3]),
+                       EOM_TRANSITION_Z_FOURTH_REF; atol=PROPERTY_TOL)
     end
 
     @testset "CCSD total energy" begin

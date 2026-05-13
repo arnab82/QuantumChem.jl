@@ -1,6 +1,6 @@
 # QuantumChem.jl
 
-Quantum chemistry methods (geometry analysis → vibrations → RHF/ROHF/UHF/direct SCF → RHF gradients/geometry optimization → MP2/UMP2 → CCSD/UCCSD → CCSD(T)/CCSDT → CIS/CISD/HCI/FCI/DMRG/TDHF → Davidson CIS → EOM-CCSD)
+Quantum chemistry methods (geometry analysis → vibrations → RHF/ROHF/UHF/direct SCF → RHF gradients/geometry optimization → MP2/RI-MP2/UMP2 → CCSD/UCCSD → CCSD(T)/CCSDT → CIS/CISD/HCI/FCI/DMRG/TDHF → Davidson CIS → EOM-CCSD → CIS/EOM properties)
 implemented in Julia,
 using PySCF for integrals plus Einsum.jl and TensorOperations.jl for tensor contractions.
 
@@ -35,10 +35,12 @@ plus local follow-on inclusions:
 | #24 | RHF analytic nuclear gradients | Implemented via `src/gradients.jl` and `run_rhf_gradient(...)` |
 | #25 | RHF geometry optimization | Implemented via `src/optimization.jl` and `run_rhf_geometry_optimization(...)` |
 | #26 | Integral-direct RHF | Implemented via `src/direct_scf.jl` and `run_rhf(direct=true)` |
+| #27 | Density fitting / RI-MP2 | Implemented via `src/density_fitting.jl` and `run_df_mp2(...)` |
+| #28 | Response properties | Implemented as CIS and EOM-CCSD transition dipoles/oscillator strengths via `src/response_properties.jl` |
 
 ## Inclusions
 
-All local inclusions through #26 are implemented.
+All local inclusions through #28 are implemented.
 
 ## Files
 
@@ -55,6 +57,7 @@ All local inclusions through #26 are implemented.
 | `rohf.jl` | Restricted open-shell Hartree-Fock SCF |
 | `uhf.jl` | Unrestricted Hartree-Fock SCF |
 | `mp2.jl` | AO→MO integral transformation + MP2 energy |
+| `density_fitting.jl` | Density-fitting three-index factors and RI-MP2 |
 | `ump2.jl` | UMP2 from unrestricted alpha/beta spin orbitals |
 | `ccsd.jl` | CCSD in the antisymmetrized spin-orbital basis |
 | `uccsd.jl` | UCCSD from unrestricted alpha/beta spin orbitals |
@@ -67,9 +70,10 @@ All local inclusions through #26 are implemented.
 | `custom_dmrg.jl` | Hartree-Fock-basis product-MPO DMRG and two-site sweep optimizer |
 | `fci_dmrg.jl` | FCI-reference MPS helpers, determinant-space MPO contractions, and exact small-system DMRG checks |
 | `eom_ccsd.jl` | EOM-CCSD residual Jacobian and excitation roots |
+| `response_properties.jl` | RHF dipoles plus CIS/EOM-CCSD transition dipoles and oscillator strengths |
 
 The package entry point is `src/QuantumChem.jl`; use `Pkg.test()` to run the
-Crawford Project #1, #2, #5, #6, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, and #26 reference checks.
+Crawford Project #1, #2, #5, #6, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, #27, and #28 reference checks.
 Per-project study notes live in [`notes/README.md`](notes/README.md).
 
 ## System
@@ -88,6 +92,7 @@ H  -1.638036840407   1.136548822547   0.000000000000
 | -------- | ----------- |
 | E_HF | −74.942 079 928 192 |
 | E_MP2 corr | −0.049 149 636 120 |
+| E_RI-MP2 corr (`weigend` aux) | −0.049 090 437 203 |
 | E_CCSD corr | −0.070 680 088 376 |
 | E_total (CCSD) | −75.012 760 016 568 |
 | E(T) | −0.000 099 877 272 |
@@ -152,6 +157,21 @@ D = make_density(rhf.mo_coeffs, rhf.n_elec ÷ 2)
 F = make_fock_direct(D, rhf.h1e, rhf.mol)
 ```
 
+Project #27 evaluates MP2 with density fitting.  PySCF supplies the three-center
+AO integrals and auxiliary Coulomb metric, while Julia orthonormalizes the
+metric, transforms the factors to the MO basis, and computes RI-MP2 from
+three-index dot products:
+
+```julia
+rhf = run_rhf()
+dfmp2 = run_df_mp2(rhf; auxbasis="weigend")
+dfmp2.emp2
+dfmp2.naux
+```
+
+Set `return_eri=true` to reconstruct the approximate four-index MO ERI tensor
+for validation on small systems.
+
 Project #12 excited states use the RHF canonical orbitals and MO ERIs:
 
 ```julia
@@ -181,6 +201,21 @@ spin-orbital excitation space:
 ccsd = run_ccsd(rhf, mp2; diis=true)
 eom = run_eom_ccsd(rhf, mp2, ccsd; nroots=5)
 eom.energies               # EOM-CCSD excitation energies in Eh
+```
+
+Project #28 evaluates excited-state one-photon properties.  CIS uses
+spin-adapted singlet transition dipoles; EOM-CCSD uses the singles block of the
+selected right eigenvectors as a compact educational analogue of full
+coupled-cluster response:
+
+```julia
+excited = run_excited_states(rhf, mp2)
+cis_props = run_cis_properties(rhf, excited; nroots=5)
+
+ccsd = run_ccsd(rhf, mp2; diis=true)
+eom = run_eom_ccsd(rhf, mp2, ccsd; nroots=5)
+eom_props = run_eom_ccsd_properties(rhf, eom; nroots=5)
+eom_props.oscillator_strengths
 ```
 
 Project #15 uses separate alpha and beta spin spaces for unrestricted
@@ -319,9 +354,9 @@ opt.atoms
 ## H2O cc-pVDZ benchmark driver
 
 The `examples/h2o_ccpvdz_benchmark.jl` script runs the water comparison you can
-use for RHF, MP2, CCSD, CCSD(T), HCI, and custom DMRG.  Full-basis CCSDT and
-dense CISD are guarded because they are intentionally expensive in this
-educational implementation:
+use for RHF, MP2, RI-MP2, CCSD, CCSD(T), HCI, and custom DMRG.  Full-basis
+CCSDT and dense CISD are guarded because they are intentionally expensive in
+this educational implementation:
 
 ```shell
 julia --threads=auto --project=. examples/h2o_ccpvdz_benchmark.jl

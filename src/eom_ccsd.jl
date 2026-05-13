@@ -338,6 +338,29 @@ function _positive_real_eom_roots(values; atol=1e-7)
     return sort(roots)
 end
 
+function _positive_real_eom_root_indices(values; atol=1e-7)
+    indices = Int[]
+    for (idx, value) in pairs(values)
+        abs(imag(value)) <= atol || continue
+        real(value) > atol && push!(indices, idx)
+    end
+    return sort(indices; by=idx -> real(values[idx]))
+end
+
+function _real_eom_vectors(vectors, indices; atol=1e-7)
+    selected = zeros(Float64, size(vectors, 1), length(indices))
+    for (col, idx) in enumerate(indices)
+        vector = vectors[:, idx]
+        maximum(abs, imag.(vector)) <= atol ||
+            throw(ArgumentError("EOM-CCSD eigenvector has non-negligible imaginary part"))
+        real_vector = real.(vector)
+        vector_norm = norm(real_vector)
+        vector_norm > 0.0 || throw(ArgumentError("EOM-CCSD eigenvector has zero norm"))
+        selected[:, col] .= real_vector ./ vector_norm
+    end
+    return selected
+end
+
 """
     run_eom_ccsd(rhf, mp2_result, ccsd_result; nroots=5, verbose=true)
 
@@ -366,10 +389,13 @@ function run_eom_ccsd(rhf, mp2_result, ccsd_result;
         ccsd_result.ts, ccsd_result.td;
         finite_difference_step,
     )
-    values = eigvals(jacobian)
-    roots = _positive_real_eom_roots(values)
-    count = min(nroots, length(roots))
-    energies = roots[1:count]
+    factorization = eigen(jacobian)
+    values = factorization.values
+    root_indices = _positive_real_eom_root_indices(values)
+    count = min(nroots, length(root_indices))
+    selected_indices = root_indices[1:count]
+    energies = real.(values[selected_indices])
+    vectors = _real_eom_vectors(factorization.vectors, selected_indices)
 
     singles_diag, doubles_diag = eom_ccsd_diagonal(F_so, o, v, n_elec)
     diagonal = pack_eom_amplitudes(singles_diag, doubles_diag, o, v)
@@ -386,6 +412,9 @@ function run_eom_ccsd(rhf, mp2_result, ccsd_result;
         energies=energies,
         energies_ev=energies .* HARTREE_TO_EV,
         all_eigenvalues=values,
+        all_eigenvectors=factorization.vectors,
+        root_indices=selected_indices,
+        vectors=vectors,
         jacobian=jacobian,
         residual=residual,
         diagonal=diagonal,
