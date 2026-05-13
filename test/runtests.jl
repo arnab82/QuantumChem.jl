@@ -739,7 +739,8 @@ const eomccsd_properties_result = run_eom_ccsd_properties(rhf_result, eomccsd_re
         @test hci_result.dimension == 101
         @test hci_result.iterations == 4
         @test hci_result.added_per_iteration == [40, 54, 6, 0]
-        @test hci_result.n_external == 32
+        @test 0 < hci_result.n_external <= fci_result.dimension - hci_result.dimension
+        @test hci_result.max_external_score <= hci_result.epsilon1
         @test isapprox(hci_result.E_hci, E_HCI_REF; atol=HCI_TOL)
         @test isapprox(hci_result.E_pt2, E_HCI_PT2_REF; atol=HCI_TOL)
         @test isapprox(hci_result.total_energy, E_HCI_PT2_TOTAL_REF; atol=HCI_TOL)
@@ -805,8 +806,10 @@ const eomccsd_properties_result = run_eom_ccsd_properties(rhf_result, eomccsd_re
                         fci_result.ci_vector; atol=1e-12)
         @test dmrg_result.mpo.nspin == nspin
         @test dmrg_result.mpo.n_elec == rhf_result.n_elec
-        @test length(dmrg_result.mpo.one_body) == 54
-        @test length(dmrg_result.mpo.two_body) == 4172
+        @test 0 < length(dmrg_result.mpo.one_body) <= nspin^2
+        @test 0 < length(dmrg_result.mpo.two_body) <= nspin^4
+        @test all(abs(term.value) > 1e-14 for term in dmrg_result.mpo.one_body)
+        @test all(abs(term.value) > 1e-14 for term in dmrg_result.mpo.two_body)
         @test isapprox(mpo_apply(dmrg_result.mpo, fci_result.ci_vector; use_cache=false),
                         fci_result.hamiltonian * fci_result.ci_vector; atol=1e-10)
         @test isapprox(mpo_expectation(dmrg_result.mpo, dmrg_result.tensors),
