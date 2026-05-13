@@ -1,5 +1,22 @@
+name = "QuantumChem"
+uuid = "cca8bb4a-ff24-4c80-9c36-97031dc8ca83"
+version = "0.1.0"
+authors = ["arnab82"]
+
 [deps]
 Einsum = "b7d42ee7-0b51-5a75-98ca-779d3107e4c0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+TensorOperations = "6aa20fa7-93e2-5fca-9bc0-fbd0db3c71a2"
+
+[compat]
+TensorOperations = "5.6.0"
+julia = "1.11"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
